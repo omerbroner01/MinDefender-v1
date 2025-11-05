@@ -1,0 +1,808 @@
+import { storage } from "../storage";
+import { RiskScoringService } from "./riskScoring";
+import { PredictiveStressIndicatorsService } from "./predictiveStressIndicators";
+import { IntelligentInterventionsService } from "./intelligentInterventions";
+import type { OrderContext } from "@shared/tradePauseAI";
+import type { Assessment, InsertAssessment, Policy, UserBaseline } from "@shared/schema";
+
+export interface AssessmentSignals {
+  // Quick check signals
+  mouseMovements?: number[];
+  keystrokeTimings?: number[];
+  clickLatency?: number;
+  
+  // Stroop test results
+  stroopTrials?: Array<{
+    word: string;
+    color: string;
+    response: string;
+    reactionTimeMs: number;
+    correct: boolean;
+  }>;
+  
+  // Self-report
+  stressLevel?: number; // 0-10
+  
+  // Optional biometrics
+  voiceProsodyFeatures?: {
+    pitch: number;
+    jitter: number;
+    shimmer: number;
+    energy: number;
+  };
+  
+  facialExpressionFeatures?: {
+    browFurrow: number;
+    blinkRate: number;
+    gazeFixation: number;
+  };
+  
+  // Enhanced facial metrics from webcam detection
+  facialMetrics?: {
+    isPresent: boolean;
+    blinkRate: number;
+    eyeAspectRatio: number;
+    jawOpenness: number;
+    browFurrow: number;
+    gazeStability: number;
+  };
+}
+
+export interface AssessmentResult {
+  assessmentId: string;
+  riskScore: number; // 0-100
+  verdict: 'go' | 'hold' | 'block';
+  reasonTags: string[];
+  confidence: number;
+  recommendedAction: string;
+  cooldownDuration?: number;
+  // Intelligent intervention recommendations
+  interventionRecommendations?: {
+    immediate: Array<{
+      title: string;
+      description: string;
+      duration: number;
+      category: string;
+    }>;
+    shortTerm: Array<{
+      title: string;
+      description: string;
+      duration: number;
+      category: string;
+    }>;
+    longTerm: Array<{
+      title: string;
+      description: string;
+      duration: number;
+      category: string;
+    }>;
+    quickSuggestions: string[];
+    triggerAnalysis?: {
+      primaryTriggers: string[];
+      patterns: string[];
+    };
+  };
+}
+
+export class TradePauseService {
+  private riskScoring: RiskScoringService;
+  private predictiveStressIndicators: PredictiveStressIndicatorsService;
+  private intelligentInterventions: IntelligentInterventionsService;
+
+  constructor() {
+    this.riskScoring = new RiskScoringService();
+    this.predictiveStressIndicators = new PredictiveStressIndicatorsService(storage);
+    this.intelligentInterventions = new IntelligentInterventionsService(storage);
+  }
+
+  async checkBeforeTrade(
+    userId: string,
+    orderContext: OrderContext,
+    signals: AssessmentSignals,
+    fastMode = false
+  ): Promise<AssessmentResult> {
+    // If no meaningful signals were provided, avoid computing a final score
+    // which can produce misleading demo values. Create a placeholder
+    // assessment and return a pending response so the client can collect
+    // signals and update the assessment later.
+    const hasSignals = !!(
+      (signals.mouseMovements && signals.mouseMovements.length > 0) ||
+      (signals.keystrokeTimings && signals.keystrokeTimings.length > 0) ||
+      (signals.stroopTrials && signals.stroopTrials.length > 0) ||
+      (signals.stressLevel !== undefined && signals.stressLevel !== null) ||
+      (signals.facialMetrics && signals.facialMetrics.isPresent) ||
+      signals.voiceProsodyFeatures
+    );
+
+    if (!hasSignals) {
+      // Create lightweight placeholder assessment and return pending status
+      const policy = await storage.getDefaultPolicy();
+      const placeholder = await storage.createAssessment({
+        userId,
+        policyId: policy.id,
+        orderContext,
+        quickCheckDurationMs: 0,
+        stroopTestResults: null,
+        selfReportStress: null,
+        behavioralMetrics: {},
+        voiceProsodyScore: null,
+        facialExpressionScore: null,
+        riskScore: null as any,
+        verdict: 'pending' as any,
+        reasonTags: [],
+      } as any);
+
+      return {
+        assessmentId: placeholder.id,
+        // Mark as pending to ensure callers don't treat this as a final numeric score
+        pending: true as any,
+        verdict: 'pending' as any,
+        reasonTags: [],
+        confidence: 0,
+        recommendedAction: 'Assessment pending',
+        cooldownDuration: undefined,
+        interventionRecommendations: undefined,
+      } as any;
+    }
+    // Get user baseline and policy
+    const [baseline, policy] = await Promise.all([
+      storage.getUserBaseline(userId),
+      storage.getDefaultPolicy() // In production, this would be user/desk-specific
+    ]);
+
+    // Generate predictive stress analysis
+    let stressPrediction = null;
+    if (!fastMode && signals.mouseMovements && signals.keystrokeTimings) {
+      try {
+        const biometricData = {
+          mouseMovements: signals.mouseMovements.map((velocity, index) => ({
+            x: Math.random() * 1000, // Mock coordinates
+            y: Math.random() * 800,
+            timestamp: Date.now() + index * 100,
+            velocity: velocity,
+            acceleration: velocity > 0 ? velocity * 0.1 : 0
+          })),
+          keystrokeRhythm: signals.keystrokeTimings?.map((timing, index) => ({
+            key: String.fromCharCode(65 + (index % 26)),
+            pressTime: timing,
+            releaseTime: timing + 50,
+            dwellTime: 50,
+            flightTime: index > 0 ? timing - (signals.keystrokeTimings?.[index - 1] || 0) : 0
+          })) || [],
+          facialMetrics: signals.facialMetrics ? [{
+            timestamp: Date.now(),
+            // keep new normalized names
+            blinkRate: signals.facialMetrics.blinkRate ?? 15,
+            browFurrow: signals.facialMetrics.browFurrow ?? 0.3,
+            jawOpenness: signals.facialMetrics.jawOpenness ?? 0.2,
+            gazeStability: signals.facialMetrics.gazeStability ?? 0.8,
+            // include legacy field names expected by downstream predictive service
+            eyeBlinkRate: signals.facialMetrics.blinkRate ?? 15,
+            browFurrowing: signals.facialMetrics.browFurrow ?? 0.3,
+            jawTension: signals.facialMetrics.jawOpenness ?? 0.2,
+            headStability: signals.facialMetrics.gazeStability ?? 0.8,
+          }] : [],
+          cognitiveLoad: signals.stroopTrials ? [{
+            timestamp: Date.now(),
+            reactionTime: signals.stroopTrials.reduce((avg, trial) => avg + trial.reactionTimeMs, 0) / signals.stroopTrials.length,
+            accuracy: signals.stroopTrials.filter(trial => trial.correct).length / signals.stroopTrials.length,
+            responseVariability: this.calculateResponseVariability(signals.stroopTrials)
+          }] : []
+        };
+
+        stressPrediction = await this.predictiveStressIndicators.predictStressLevel(
+          userId,
+          biometricData,
+          {
+            timeOfDay: orderContext.timeOfDay,
+            marketConditions: orderContext.marketVolatility && orderContext.marketVolatility > 0.7 ? 'high_volatility' : 'normal',
+            recentTradingActivity: orderContext.recentLosses && orderContext.recentLosses > 2 ? 'recent_losses' : 'normal',
+            currentPortfolioStatus: orderContext.currentPnL && orderContext.currentPnL < 0 ? 'negative_pnl' : 'positive_pnl'
+          }
+        );
+
+        console.log(`🔮 Stress prediction for ${userId}: ${stressPrediction.predictedStressLevel}/10 (confidence: ${stressPrediction.confidence})`);
+      } catch (error) {
+        console.error('Predictive stress analysis failed:', error);
+        // Continue with normal assessment flow
+      }
+    }
+
+    // Create assessment record
+    const assessment = await storage.createAssessment({
+      userId,
+      policyId: policy.id,
+      orderContext,
+      quickCheckDurationMs: this.calculateQuickCheckDuration(signals),
+      stroopTestResults: signals.stroopTrials || null,
+      selfReportStress: signals.stressLevel || null,
+      behavioralMetrics: {
+        mouseMovements: signals.mouseMovements || [],
+        keystrokeTimings: signals.keystrokeTimings || [],
+        clickLatency: signals.clickLatency || null,
+      },
+      voiceProsodyScore: signals.voiceProsodyFeatures ? 
+        this.calculateVoiceProsodyScore(signals.voiceProsodyFeatures) : null,
+      facialExpressionScore: signals.facialMetrics ?
+        this.calculateFacialExpressionScoreFromMetrics(signals.facialMetrics) : 
+        signals.facialExpressionFeatures ?
+          this.calculateFacialExpressionScore(signals.facialExpressionFeatures) : null,
+      riskScore: null,
+      verdict: 'pending',
+      reasonTags: [],
+    });
+
+    // Calculate risk score with intelligent pattern analysis
+    // Enhance signals with predictive stress insights
+    const enhancedSignals = {
+      ...signals,
+      predictiveStressData: stressPrediction ? {
+        predictedStressLevel: stressPrediction.predictedStressLevel,
+        confidence: stressPrediction.confidence,
+        timeToOnset: stressPrediction.timeToOnset,
+        riskFactors: stressPrediction.riskFactors,
+        earlyWarningSignals: stressPrediction.earlyWarningSignals
+      } : null
+    };
+
+    const riskResult = await this.riskScoring.calculateRiskScore(
+      enhancedSignals,
+      baseline,
+      orderContext,
+      policy,
+      userId  // Enable intelligent pattern recognition
+    );
+
+    // If the scoring confidence is very low, treat this as a pending assessment
+    // so we don't provide misleading numeric results based on weak/contextual data.
+    if ((riskResult.confidence || 0) < 0.25) {
+      // mark assessment as pending and avoid returning a numeric score
+      await storage.updateAssessment(assessment.id, {
+        riskScore: null as any,
+        verdict: 'pending' as any,
+      });
+
+      return {
+        assessmentId: assessment.id,
+        // indicate pending; do NOT include a numeric riskScore so clients won't display a false score
+        pending: true as any,
+        verdict: 'pending' as any,
+        reasonTags: [],
+        confidence: riskResult.confidence,
+        recommendedAction: 'Assessment pending',
+        cooldownDuration: undefined,
+        interventionRecommendations: undefined,
+      } as any;
+    }
+
+    // Determine verdict based on risk score and policy
+    const verdict = this.determineVerdict(riskResult.riskScore, policy);
+    const reasonTags = this.generateReasonTags(riskResult, signals, baseline);
+
+    // Update assessment with results
+    // Only update with valid risk scores
+    if (typeof riskResult.riskScore === 'number' && !isNaN(riskResult.riskScore)) {
+      await storage.updateAssessment(assessment.id, {
+        riskScore: riskResult.riskScore,
+        verdict,
+        reasonTags,
+        confidence: riskResult.confidence || 0,
+      });
+    } else {
+      console.error('Invalid risk score received:', riskResult);
+      throw new Error('Invalid risk score calculated');
+    }
+
+    // Log audit event and create real-time event in parallel
+    await Promise.all([
+      storage.createAuditLog({
+        userId,
+        assessmentId: assessment.id,
+        action: 'assessment_completed',
+        details: {
+          riskScore: riskResult.riskScore,
+          verdict,
+          reasonTags,
+          orderContext,
+        },
+      }),
+      storage.createEvent({
+        eventType: 'verdict_rendered',
+        userId,
+        assessmentId: assessment.id,
+        data: {
+          verdict,
+          riskScore: riskResult.riskScore,
+          reasonTags,
+        },
+      })
+    ]);
+
+    // Generate intelligent intervention recommendations
+    let interventionRecommendations = undefined;
+    try {
+      const interventionPlan = await this.intelligentInterventions.generatePersonalizedPlan(
+        userId,
+        assessment,
+        signals,
+        baseline
+      );
+
+      interventionRecommendations = {
+        immediate: interventionPlan.immediateRecommendations.map(rec => ({
+          title: rec.title,
+          description: rec.description,
+          duration: rec.estimatedDuration,
+          category: rec.category
+        })),
+        shortTerm: interventionPlan.shortTermStrategies.map(rec => ({
+          title: rec.title,
+          description: rec.description,
+          duration: rec.estimatedDuration,
+          category: rec.category
+        })),
+        longTerm: interventionPlan.longTermDevelopment.map(rec => ({
+          title: rec.title,
+          description: rec.description,
+          duration: rec.estimatedDuration,
+          category: rec.category
+        })),
+        quickSuggestions: this.intelligentInterventions.getQuickInterventions(
+          assessment.selfReportStress || 5
+        ),
+        triggerAnalysis: {
+          primaryTriggers: interventionPlan.triggerAnalysis.primaryTriggers,
+          patterns: interventionPlan.triggerAnalysis.historicalPatterns
+        }
+      };
+
+      console.log(`🎯 Generated intervention plan for ${userId}: ${interventionRecommendations.immediate.length} immediate, ${interventionRecommendations.shortTerm.length} short-term, ${interventionRecommendations.longTerm.length} long-term recommendations`);
+    } catch (error) {
+      console.error('Intervention generation failed (non-critical):', error);
+      // Fallback to simple quick suggestions
+      interventionRecommendations = {
+        immediate: [],
+        shortTerm: [],
+        longTerm: [],
+        quickSuggestions: this.intelligentInterventions.getQuickInterventions(
+          assessment.selfReportStress || 5
+        ),
+        triggerAnalysis: {
+          primaryTriggers: [],
+          patterns: []
+        }
+      };
+    }
+
+    return {
+      assessmentId: assessment.id,
+      riskScore: riskResult.riskScore,
+      verdict,
+      reasonTags,
+      confidence: riskResult.confidence,
+      recommendedAction: this.getRecommendedAction(verdict, riskResult.riskScore),
+      cooldownDuration: verdict === 'hold' ? policy.cooldownDuration : undefined,
+      interventionRecommendations,
+    };
+  }
+
+  async recordCooldownCompletion(
+    assessmentId: string,
+    durationMs: number
+  ): Promise<void> {
+    await storage.updateAssessment(assessmentId, {
+      cooldownCompleted: true,
+      cooldownDurationMs: durationMs,
+    });
+
+    await storage.createAuditLog({
+      assessmentId,
+      action: 'cooldown_completed',
+      details: { durationMs },
+    });
+  }
+
+  async recordJournalEntry(
+    assessmentId: string,
+    trigger: string,
+    plan: string,
+    entry?: string
+  ): Promise<void> {
+    await storage.updateAssessment(assessmentId, {
+      journalTrigger: trigger,
+      journalPlan: plan,
+      journalEntry: entry,
+    });
+
+    await storage.createAuditLog({
+      assessmentId,
+      action: 'journal_entry_saved',
+      details: { trigger, plan, entry },
+    });
+  }
+
+  async updateAssessmentFacialMetrics(
+    assessmentId: string,
+    facialMetrics?: {
+      isPresent: boolean;
+      blinkRate: number;
+      eyeAspectRatio: number;
+      jawOpenness: number;
+      browFurrow: number;
+      gazeStability: number;
+    },
+    stressLevel?: number,
+    cognitiveResults?: any[]
+  ): Promise<void> {
+    console.log('🔍 updateAssessmentFacialMetrics received:', {
+      assessmentId,
+      facialMetrics: !!facialMetrics,
+      stressLevel,
+      cognitiveResults: cognitiveResults?.length || 0
+    });
+
+    const updateData: any = {};
+    let facialExpressionScore: number | undefined = undefined;
+
+    // Process facial metrics if provided
+    if (facialMetrics) {
+      // Clamp and validate incoming facial metrics to safe ranges before scoring
+      const safeMetrics = {
+        isPresent: !!facialMetrics.isPresent,
+        blinkRate: Math.max(0, Math.min(60, facialMetrics.blinkRate || 0)),
+        eyeAspectRatio: Math.max(0, Math.min(1, facialMetrics.eyeAspectRatio || 0)),
+        jawOpenness: Math.max(0, Math.min(1, facialMetrics.jawOpenness || 0)),
+        browFurrow: Math.max(0, Math.min(1, facialMetrics.browFurrow || 0)),
+        gazeStability: Math.max(0, Math.min(1, facialMetrics.gazeStability || 0)),
+      };
+
+      // Validate that all values are finite numbers
+      const allFinite = Object.entries(safeMetrics).every(([key, value]) => {
+        if (key === 'isPresent') return true;
+        return typeof value === 'number' && isFinite(value);
+      });
+
+      if (!allFinite) {
+        console.error('Invalid facial metrics received - contains NaN or Infinity:', facialMetrics);
+        throw new Error('Invalid facial metrics provided');
+      }
+
+      facialExpressionScore = this.calculateFacialExpressionScoreFromMetrics(safeMetrics as any);
+      console.log('🧮 Calculated facialExpressionScore:', facialExpressionScore);
+      
+      updateData.facialMetrics = safeMetrics;
+      updateData.facialExpressionScore = facialExpressionScore;
+    }
+
+    // Process stress level if provided
+    if (stressLevel !== undefined) {
+      // Validate and clamp stress level
+      const clampedStressLevel = Math.max(0, Math.min(10, stressLevel));
+      
+      if (isNaN(clampedStressLevel) || !isFinite(clampedStressLevel)) {
+        console.error('Invalid stress level received:', stressLevel);
+        throw new Error('Invalid stress level provided');
+      }
+      
+      console.log('🔍 Updating selfReportStress to:', clampedStressLevel);
+      updateData.selfReportStress = clampedStressLevel;
+    }
+
+    // Process cognitive results if provided  
+    let cognitiveAnalytics: any = undefined;
+    if (cognitiveResults && cognitiveResults.length > 0) {
+      console.log('🧠 Processing cognitive results:', cognitiveResults.length, 'test results');
+      cognitiveAnalytics = this.processCognitiveResults(cognitiveResults);
+      updateData.cognitiveAnalytics = cognitiveAnalytics;
+    }
+
+    // Update the assessment with new data
+    await storage.updateAssessment(assessmentId, updateData);
+
+    // CRITICAL: Recalculate risk score only if we have a valid assessment and
+    // the update contains meaningful information (stressLevel or facial metrics)
+    if ((stressLevel !== undefined) || (facialMetrics)) {
+      const assessment = await storage.getAssessment(assessmentId);
+      if (assessment) {
+        // Map assessment data to signals format for risk calculation
+        const signals: AssessmentSignals = {
+          stressLevel: (assessment.selfReportStress ?? undefined) as any,
+          mouseMovements: (assessment.behavioralMetrics && (assessment.behavioralMetrics as any).mouseMovements) || undefined,
+          keystrokeTimings: (assessment.behavioralMetrics && (assessment.behavioralMetrics as any).keystrokeTimings) || undefined,
+          facialMetrics: (assessment.facialMetrics as any) || undefined,
+          voiceProsodyFeatures: (assessment.voiceProsodyScore !== undefined) ? { pitch: 0, jitter: 0, shimmer: 0, energy: assessment.voiceProsodyScore } : undefined as any,
+          stroopTrials: assessment.stroopTestResults as any,
+        };
+        
+        const baseline = await storage.getUserBaseline(assessment.userId);
+        const policy = await storage.getPolicy(assessment.policyId);
+        
+        const riskResult = await this.riskScoring.calculateRiskScore(
+          signals,
+          baseline || undefined,
+          (assessment.orderContext as any) || undefined,
+          policy || undefined
+        );
+        
+        // Validate risk score before updating
+        if (typeof riskResult.riskScore === 'number' && isFinite(riskResult.riskScore)) {
+          await storage.updateAssessment(assessmentId, { riskScore: riskResult.riskScore });
+          console.log('🔍 Recalculated risk score after update:', riskResult.riskScore);
+        } else {
+          console.error('Invalid risk score calculated:', riskResult.riskScore);
+        }
+      }
+    }
+
+    console.log('✓ Assessment updated with data:', updateData);
+
+    // Create audit log safely - don't fail the entire operation if audit log fails
+    try {
+      await storage.createAuditLog({
+        assessmentId,
+        action: 'facial_metrics_updated',
+        details: { facialMetrics, facialExpressionScore },
+      });
+      console.log('✓ Audit log created successfully');
+    } catch (auditError) {
+      console.error('⚠️ Audit log creation failed (non-critical):', auditError);
+      // Continue - facial metrics update was successful
+    }
+  }
+
+  private processCognitiveResults(cognitiveResults: any[]): any {
+    // Extract key metrics from advanced cognitive assessment results
+    const allTrials = cognitiveResults.flatMap(result => result.trials || []);
+    
+    if (allTrials.length === 0) {
+      return {
+        overallScore: 0.5,
+        reactionTimeMs: 800,
+        accuracy: 0.5,
+        consistency: 0.5,
+        attentionMetrics: {
+          focusLapses: 0,
+          vigilanceDecline: 0
+        },
+        stressIndicators: {
+          performanceDecline: 0,
+          errorRate: 0.5,
+          responseVariability: 0.3
+        }
+      };
+    }
+
+    // Calculate aggregated metrics across all test types
+    const reactionTimes = allTrials.map(t => t.reactionTimeMs);
+    const avgReactionTime = reactionTimes.reduce((sum, rt) => sum + rt, 0) / reactionTimes.length;
+    const accuracy = allTrials.filter(t => t.correct).length / allTrials.length;
+    
+    // Calculate reaction time consistency
+    const reactionVariance = reactionTimes.reduce((sum, rt) => 
+      sum + Math.pow(rt - avgReactionTime, 2), 0) / reactionTimes.length;
+    const consistency = Math.max(0, Math.min(1, 1 - reactionVariance / 1000000));
+
+    // Attention and stress indicators from all cognitive test results
+    const focusLapses = allTrials.filter(t => t.hesitationCount > 2).length;
+    
+    // Vigilance decline: compare first vs last half performance
+    const firstHalf = allTrials.slice(0, Math.floor(allTrials.length / 2));
+    const lastHalf = allTrials.slice(Math.floor(allTrials.length / 2));
+    const vigilanceDecline = (firstHalf.filter(t => t.correct).length / firstHalf.length) - 
+                            (lastHalf.filter(t => t.correct).length / lastHalf.length);
+
+    // Performance decline and error rate
+    const errorRate = 1 - accuracy;
+    const performanceDecline = Math.max(0, vigilanceDecline);
+    const responseVariability = Math.sqrt(reactionVariance) / avgReactionTime;
+
+    // Overall cognitive score (weighted combination)
+    const overallScore = (
+      accuracy * 0.4 +
+      Math.max(0, Math.min(1, 1 - (avgReactionTime - 500) / 2000)) * 0.3 +
+      consistency * 0.2 +
+      Math.max(0, 1 - performanceDecline) * 0.1
+    );
+
+    console.log('🧠 Cognitive analytics computed:', {
+      trials: allTrials.length,
+      overallScore: overallScore.toFixed(2),
+      avgReactionTime: Math.round(avgReactionTime),
+      accuracy: (accuracy * 100).toFixed(1) + '%'
+    });
+
+    return {
+      overallScore,
+      reactionTimeMs: Math.round(avgReactionTime),
+      accuracy,
+      consistency,
+      attentionMetrics: {
+        focusLapses,
+        vigilanceDecline: Math.max(0, vigilanceDecline)
+      },
+      stressIndicators: {
+        performanceDecline,
+        errorRate,
+        responseVariability: Math.min(1, responseVariability)
+      }
+    };
+  }
+
+  async recordOverride(
+    assessmentId: string,
+    reason: string,
+    userId: string
+  ): Promise<void> {
+    const assessment = await storage.getAssessment(assessmentId);
+    if (!assessment) throw new Error('Assessment not found');
+
+    await storage.updateAssessment(assessmentId, {
+      overrideUsed: true,
+      overrideReason: reason,
+      supervisorNotified: true,
+    });
+
+    await storage.createAuditLog({
+      userId,
+      assessmentId,
+      action: 'override_used',
+      details: { reason, originalVerdict: assessment.verdict },
+    });
+
+    await storage.createEvent({
+      eventType: 'override_used',
+      userId,
+      assessmentId,
+      data: {
+        reason,
+        originalVerdict: assessment.verdict,
+        riskScore: assessment.riskScore,
+      },
+    });
+  }
+
+  async recordTradeOutcome(
+    assessmentId: string,
+    outcome: {
+      executed: boolean;
+      pnl?: number;
+      duration?: number;
+      maxFavorableExcursion?: number;
+      maxAdverseExcursion?: number;
+    }
+  ): Promise<void> {
+    await storage.updateAssessment(assessmentId, {
+      tradeExecuted: outcome.executed,
+      tradeOutcome: outcome,
+    });
+  }
+
+  private calculateQuickCheckDuration(signals: AssessmentSignals): number {
+    // Simple heuristic - in production this would be more sophisticated
+    const baseTime = 1000; // 1 second base
+    const mouseDelay = signals.mouseMovements ? signals.mouseMovements.length * 10 : 0;
+    const keystrokeDelay = signals.keystrokeTimings ? 
+      signals.keystrokeTimings.reduce((sum, time) => sum + time, 0) : 0;
+    
+    return baseTime + mouseDelay + keystrokeDelay;
+  }
+
+  private calculateVoiceProsodyScore(features: AssessmentSignals['voiceProsodyFeatures']): number {
+    if (!features) return 0;
+    
+    // Simplified scoring - in production this would use ML models
+    const stressIndicators = [
+      features.pitch > 200 ? 0.3 : 0, // Higher pitch indicates stress
+      features.jitter > 0.01 ? 0.25 : 0, // Voice instability
+      features.shimmer > 0.05 ? 0.25 : 0, // Amplitude variation
+      features.energy < 0.5 ? 0.2 : 0, // Low energy can indicate fatigue
+    ];
+    
+    return Math.min(1.0, stressIndicators.reduce((sum, score) => sum + score, 0));
+  }
+
+  private calculateFacialExpressionScore(features: AssessmentSignals['facialExpressionFeatures']): number {
+    if (!features) return 0;
+    
+    // Simplified scoring - in production this would use computer vision models
+    const stressIndicators = [
+      features.browFurrow > 0.5 ? 0.4 : 0, // Furrowed brow
+      features.blinkRate > 20 ? 0.3 : 0, // Increased blink rate
+      features.gazeFixation < 0.3 ? 0.3 : 0, // Lack of focus
+    ];
+    
+    return Math.min(1.0, stressIndicators.reduce((sum, score) => sum + score, 0));
+  }
+
+  private calculateFacialExpressionScoreFromMetrics(metrics: AssessmentSignals['facialMetrics']): number {
+    if (!metrics || !metrics.isPresent) return 0;
+    
+    // Validate and clamp all input metrics to safe ranges
+    const blinkRate = Math.max(0, Math.min(60, metrics.blinkRate || 0));
+    const browFurrow = Math.max(0, Math.min(1, metrics.browFurrow || 0));
+    const gazeStability = Math.max(0, Math.min(1, metrics.gazeStability || 0));
+    const eyeAspectRatio = Math.max(0, Math.min(1, metrics.eyeAspectRatio || 0));
+    const jawOpenness = Math.max(0, Math.min(1, metrics.jawOpenness || 0));
+    
+    // Real MediaPipe-based facial stress indicators
+    const stressIndicators = [
+      // Abnormal blink rate (normal: 12-20 per minute)
+      blinkRate < 8 || blinkRate > 25 ? 0.3 : 0,
+      
+      // High brow furrow indicates stress/concentration
+      browFurrow > 0.6 ? 0.35 : browFurrow > 0.3 ? 0.15 : 0,
+      
+      // Low gaze stability indicates distraction/anxiety
+      gazeStability < 0.5 ? 0.25 : gazeStability < 0.7 ? 0.1 : 0,
+      
+      // Very low eye aspect ratio indicates fatigue/stress
+      eyeAspectRatio < 0.15 ? 0.2 : 0,
+      
+      // Jaw tension (abnormal openness patterns)
+      jawOpenness > 0.7 ? 0.1 : 0,
+    ];
+    
+    const score = Math.min(1.0, stressIndicators.reduce((sum, score) => sum + score, 0));
+    
+    // Validate final score
+    if (isNaN(score) || !isFinite(score)) {
+      console.warn('Invalid facial expression score calculated, returning 0');
+      return 0;
+    }
+    
+    return score;
+  }
+
+  private determineVerdict(riskScore: number, policy: Policy): 'go' | 'hold' | 'block' {
+    if (riskScore >= 80) return 'block';
+    if (riskScore >= policy.riskThreshold) return 'hold';
+    return 'go';
+  }
+
+  private generateReasonTags(
+    riskResult: any,
+    signals: AssessmentSignals,
+    baseline?: UserBaseline
+  ): string[] {
+    const tags: string[] = [];
+    
+    if (riskResult.reactionTimeElevated) tags.push('Reaction time elevated');
+    if (riskResult.accuracyLow) tags.push('Accuracy below baseline');
+    if (signals.stressLevel && signals.stressLevel >= 7) tags.push('Self-report high stress');
+    if (riskResult.behavioralAnomalies) tags.push('Behavioral anomalies detected');
+    if (riskResult.voiceStressDetected) tags.push('Voice stress indicators');
+    if (riskResult.facialStressDetected) tags.push('Facial stress indicators');
+    
+    return tags;
+  }
+
+  private getRecommendedAction(verdict: 'go' | 'hold' | 'block', riskScore: number): string {
+    switch (verdict) {
+      case 'go':
+        return 'Proceed with trade - stress levels appear normal';
+      case 'hold':
+        return 'Consider taking a breathing break before proceeding';
+      case 'block':
+        return 'High stress detected - recommend postponing trade and reflecting on triggers';
+      default:
+        return 'Assessment completed';
+    }
+  }
+
+  private calculateResponseVariability(stroopTrials: Array<{
+    word: string;
+    color: string;
+    response: string;
+    reactionTimeMs: number;
+    correct: boolean;
+  }>): number {
+    if (stroopTrials.length < 2) return 0;
+    
+    const reactionTimes = stroopTrials.map(trial => trial.reactionTimeMs);
+    const mean = reactionTimes.reduce((sum, time) => sum + time, 0) / reactionTimes.length;
+    const variance = reactionTimes.reduce((sum, time) => sum + Math.pow(time - mean, 2), 0) / reactionTimes.length;
+    
+    // Normalize variability to 0-1 scale (higher = more variable = more stress)
+    return Math.min(1, Math.sqrt(variance) / mean);
+  }
+}

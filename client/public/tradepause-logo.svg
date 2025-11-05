@@ -1,0 +1,20 @@
+<svg width="400" height="100" viewBox="0 0 400 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- TradePause Logo Lockup -->
+  <!-- Minimum width: 120px -->
+  <!-- Clear space: 50px (icon width / 2) -->
+  <!-- Gradient: #8D5EF5 → #00C2FF -->
+  
+  <defs>
+    <linearGradient id="tradepause-brand-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8D5EF5" />
+      <stop offset="100%" stop-color="#00C2FF" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Icon -->
+  <rect width="100" height="100" rx="20" fill="url(#tradepause-brand-gradient)" />
+  <text x="50" y="70" font-family="Inter, sans-serif" font-size="60" font-weight="700" fill="white" text-anchor="middle">TP</text>
+  
+  <!-- Text -->
+  <text x="120" y="65" font-family="Inter, sans-serif" font-size="40" font-weight="600" fill="url(#tradepause-brand-gradient)">TradePause</text>
+</svg>

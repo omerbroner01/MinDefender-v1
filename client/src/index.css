@@ -1,0 +1,322 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Mindefender Brand Colors */
+  --background: 8 16 32; /* #081020 - Dark navy */
+  --foreground: 255 255 255; /* white */
+  --card: 17 24 39; /* #111827 - Slate-900 */
+  --card-foreground: 255 255 255;
+  --popover: 17 24 39;
+  --popover-foreground: 255 255 255;
+  
+  /* Primary Gradient Colors - Mindefender signature cyan-to-blue */
+  --primary-from: 0 240 255; /* #00F0FF - Cyan */
+  --primary-to: 0 102 255; /* #0066FF - Blue */
+  --primary: 0 102 255; /* fallback solid blue */
+  --primary-foreground: 255 255 255;
+  
+  /* Semantic Colors */
+  --info: 59 130 246; /* #3B82F6 - Blue-500 */
+  --info-foreground: 255 255 255;
+  --success: 16 185 129; /* #10B981 - Green-500 */
+  --success-foreground: 255 255 255;
+  --warning: 245 158 11; /* #F59E0B - Amber-500 */
+  --warning-foreground: 8 16 32;
+  --critical: 239 68 68; /* #EF4444 - Red-500 */
+  --critical-foreground: 255 255 255;
+  
+  /* Secondary & Muted */
+  --secondary: 31 41 55; /* #1F2937 - Slate-800 */
+  --secondary-foreground: 255 255 255;
+  --muted: 31 41 55; /* #1F2937 - Slate-800 */
+  --muted-foreground: 156 163 175; /* #9CA3AF - Slate-400 */
+  
+  /* Accent - Primary cyan */
+  --accent: 0 240 255; /* #00F0FF - Cyan */
+  --accent-foreground: 8 16 32;
+  
+  /* Destructive - Critical color */
+  --destructive: 239 68 68; /* #EF4444 */
+  --destructive-foreground: 255 255 255;
+  
+  /* Borders & Inputs */
+  --border: 55 65 81; /* #374151 - Slate-700 */
+  --input: 31 41 55; /* #1F2937 - Slate-800 */
+  --ring: 0 102 255; /* #0066FF - primary blue for focus rings */
+  
+  /* Chart Colors - Semantic mapping */
+  --chart-1: 16 185 129; /* success/green */
+  --chart-2: 245 158 11; /* warning/amber */
+  --chart-3: 239 68 68; /* critical/red */
+  --chart-4: 0 102 255; /* primary blue */
+  --chart-5: 0 240 255; /* primary cyan */
+  
+  /* Sidebar */
+  --sidebar: 17 24 39;
+  --sidebar-foreground: 255 255 255;
+  --sidebar-primary: 0 102 255;
+  --sidebar-primary-foreground: 255 255 255;
+  --sidebar-accent: 31 41 55;
+  --sidebar-accent-foreground: 0 240 255;
+  --sidebar-border: 55 65 81;
+  --sidebar-ring: 0 102 255;
+  
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: 'JetBrains Mono', Consolas, monospace;
+  
+  /* Spacing & Layout */
+  --radius: 12px; /* card radius */
+  
+  /* Mindefender Shadows - soft shadows with y-offset */
+  --shadow-sm: 0px 8px 12px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0px 12px 16px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0px 16px 24px rgba(0, 0, 0, 0.2);
+  
+  /* Line Heights - Mindefender Typography */
+  --leading-tight: 1.1;
+  --leading-heading: 1.2;
+  --leading-body: 1.6;
+  
+  /* Spacing Grid - 8px base */
+  --spacing: 0.5rem; /* 8px */
+}
+
+.dark {
+  /* Same as root - Mindefender is designed for dark mode */
+  --background: 8 16 32;
+  --foreground: 255 255 255;
+  --card: 17 24 39;
+  --card-foreground: 255 255 255;
+  --popover: 17 24 39;
+  --popover-foreground: 255 255 255;
+  --primary-from: 0 240 255;
+  --primary-to: 0 102 255;
+  --primary: 0 102 255;
+  --primary-foreground: 255 255 255;
+  --info: 59 130 246;
+  --info-foreground: 255 255 255;
+  --success: 16 185 129;
+  --success-foreground: 255 255 255;
+  --warning: 245 158 11;
+  --warning-foreground: 8 16 32;
+  --critical: 239 68 68;
+  --critical-foreground: 255 255 255;
+  --secondary: 31 41 55;
+  --secondary-foreground: 255 255 255;
+  --muted: 31 41 55;
+  --muted-foreground: 156 163 175;
+  --accent: 0 240 255;
+  --accent-foreground: 8 16 32;
+  --destructive: 239 68 68;
+  --destructive-foreground: 255 255 255;
+  --border: 55 65 81;
+  --input: 31 41 55;
+  --ring: 0 102 255;
+  --chart-1: 16 185 129;
+  --chart-2: 245 158 11;
+  --chart-3: 239 68 68;
+  --chart-4: 0 102 255;
+  --chart-5: 0 240 255;
+  --sidebar: 17 24 39;
+  --sidebar-foreground: 255 255 255;
+  --sidebar-primary: 0 102 255;
+  --sidebar-primary-foreground: 255 255 255;
+  --sidebar-accent: 31 41 55;
+  --sidebar-accent-foreground: 0 240 255;
+  --sidebar-border: 55 65 81;
+  --sidebar-ring: 0 102 255;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: 'JetBrains Mono', Consolas, monospace;
+  --radius: 12px;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    /* Prevent text size adjustment on mobile */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Better tap targets on mobile */
+    touch-action: manipulation;
+  }
+
+  /* Mobile-specific optimizations */
+  @media (max-width: 768px) {
+    body {
+      font-size: 16px; /* Prevent iOS zoom on input focus */
+    }
+    
+    /* Larger tap targets for mobile */
+    button, a, input, select, textarea {
+      min-height: 44px; /* iOS recommended tap target size */
+    }
+    
+    /* Readable text on mobile */
+    h1 { font-size: 1.75rem; }
+    h2 { font-size: 1.5rem; }
+    h3 { font-size: 1.25rem; }
+    h4 { font-size: 1.125rem; }
+    
+    /* Better spacing on mobile */
+    .card {
+      margin: 0.5rem;
+    }
+  }
+}
+
+/* Responsive typography helpers */
+.text-mobile-lg {
+  @apply text-base;
+}
+
+@media (min-width: 768px) {
+  .text-mobile-lg {
+    @apply text-lg;
+  }
+}
+
+.text-mobile-xl {
+  @apply text-lg;
+}
+
+@media (min-width: 768px) {
+  .text-mobile-xl {
+    @apply text-xl;
+  }
+}
+
+.text-mobile-2xl {
+  @apply text-xl;
+}
+
+@media (min-width: 768px) {
+  .text-mobile-2xl {
+    @apply text-2xl;
+  }
+}
+
+/* Mindefender Brand Utilities */
+
+/* Primary Gradient - Cyan-to-blue signature gradient for CTAs, highlights, logo */
+.bg-gradient-primary {
+  background: linear-gradient(135deg, rgb(var(--primary-from)) 0%, rgb(var(--primary-to)) 100%);
+}
+
+.text-gradient-primary {
+  background: linear-gradient(135deg, rgb(var(--primary-from)) 0%, rgb(var(--primary-to)) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Typography - Mindefender Brand */
+.heading {
+  font-weight: 600;
+  line-height: var(--leading-heading);
+}
+
+.heading-tight {
+  font-weight: 600;
+  line-height: var(--leading-tight);
+}
+
+.body-text {
+  font-weight: 400;
+  line-height: var(--leading-body);
+}
+
+.button-text {
+  font-weight: 500;
+  text-transform: none; /* sentence case */
+}
+
+/* Semantic Color Classes */
+.bg-info { background-color: rgb(var(--info)); }
+.text-info { color: rgb(var(--info)); }
+.bg-success { background-color: rgb(var(--success)); }
+.text-success { color: rgb(var(--success)); }
+.bg-warning { background-color: rgb(var(--warning)); }
+.text-warning { color: rgb(var(--warning)); }
+.bg-critical { background-color: rgb(var(--critical)); }
+.text-critical { color: rgb(var(--critical)); }
+
+/* Custom animations and effects */
+.gradient-progress {
+  background: linear-gradient(90deg, rgb(var(--success)) 0%, rgb(var(--warning)) 50%, rgb(var(--critical)) 100%);
+}
+
+.breathing-circle {
+  animation: breathe 4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { 
+    transform: scale(1); 
+    opacity: 0.8; 
+  }
+  50% { 
+    transform: scale(1.1); 
+    opacity: 1; 
+  }
+}
+
+.stroop-word {
+  font-size: 2rem;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  font-family: var(--font-sans);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--muted);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* Pulse animation for real-time indicators */
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+/* Smooth transitions for interactive elements */
+.smooth-transition {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Focus styles for accessibility */
+.focus-ring:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

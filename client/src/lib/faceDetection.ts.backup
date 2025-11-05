@@ -1,0 +1,505 @@
+/**
+ * Face Detection Service - Desktop & Mobile Compatible
+ * 
+ * This service provides real-time facial stress analysis using the advanced
+ * StressAnalysisModel. Works on both desktop webcam and mobile front camera.
+ * 
+ * Key features:
+ * - Unified stress detection across all platforms
+ * - Real-time 0-100 stress scoring
+ * - Multi-signal analysis: brow, jaw, lips, blinks, micro-expressions
+ * - Automatic trade blocking on high stress (>= 60)
+ */
+
+import { stressAnalysisModel, type StressAnalysisResult } from './stressAnalysisModel';
+
+export interface FaceMetrics {
+  isPresent: boolean;
+  blinkRate: number;
+  eyeAspectRatio: number;
+  async initialize(): Promise<void> {
+    try {
+      const isMobileDevice = this.isMobile();
+      const deviceType = isMobileDevice ? 'Mobile' : 'Desktop';
+      console.log(`🎥 INFO: Initializing Face Detection Service (${deviceType})...`);
+
+      console.log('🧠 INFO: Loading AI stress analysis model...');
+      await stressAnalysisModel.initialize();
+
+      const adjustedWidth = isMobileDevice ? Math.min(640, this.settings.targetWidth) : this.settings.targetWidth;
+      const adjustedHeight = isMobileDevice ? Math.min(720, Math.max(480, this.settings.targetHeight)) : this.settings.targetHeight;
+      const adjustedFps = isMobileDevice ? 24 : this.settings.targetFps;
+      const minDetectionConfidence = isMobileDevice ? Math.max(0.35, this.settings.minDetectionConfidence - 0.1) : this.settings.minDetectionConfidence;
+      const minTrackingConfidence = isMobileDevice ? Math.max(0.35, this.settings.minTrackingConfidence - 0.1) : this.settings.minTrackingConfidence;
+
+      this.settings = {
+        ...this.settings,
+        targetWidth: adjustedWidth,
+        targetHeight: adjustedHeight,
+        targetFps: adjustedFps,
+        minDetectionConfidence,
+        minTrackingConfidence,
+      };
+
+      stressAnalysisModel.updateConfig({
+        minDetectionConfidence,
+        minTrackingConfidence,
+        blinkCloseThreshold: this.settings.blinkCloseThreshold,
+        blinkOpenThreshold: this.settings.blinkOpenThreshold,
+        isMobile: isMobileDevice,
+      });
+      console.log('✅ INFO: AI model loaded successfully');
+
+      console.log('📹 INFO: Creating video element...');
+      this.videoElement = document.createElement('video');
+      this.videoElement.autoplay = true;
+      this.videoElement.playsInline = true;
+      this.videoElement.muted = true;
+      this.videoElement.width = this.settings.targetWidth;
+      this.videoElement.height = this.settings.targetHeight;
+      this.videoElement.setAttribute('playsinline', 'true');
+      this.videoElement.setAttribute('muted', 'true');
+
+      console.log('🎬 INFO: Requesting camera access...');
+      this.mediaStream = await this.getCameraStream();
+      console.log(`✅ INFO: Camera stream acquired (${this.mediaStream.getVideoTracks()[0]?.label || 'unknown'})`);
+
+      this.videoElement.srcObject = this.mediaStream;
+
+      const primaryTrack = this.mediaStream.getVideoTracks()[0];
+      if (primaryTrack) {
+        const appliedConstraints: MediaTrackConstraints = {
+          width: { ideal: this.settings.targetWidth, max: this.settings.targetWidth + 160 },
+          height: { ideal: this.settings.targetHeight, max: this.settings.targetHeight + 160 },
+          frameRate: { ideal: this.settings.targetFps, max: this.settings.targetFps + 6 },
+          facingMode: 'user',
+        };
+        try {
+          await primaryTrack.applyConstraints(appliedConstraints);
+        } catch (constraintErr) {
+          console.warn('⚠️ WARNING: Unable to apply preferred camera constraints:', constraintErr);
+        }
+      }
+
+      console.log('⏳ INFO: Waiting for video metadata...');
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Video metadata load timeout')), 5000);
+        const handleLoaded = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+
+        if (this.videoElement && this.videoElement.readyState >= 1) {
+          handleLoaded();
+        } else {
+          this.videoElement?.addEventListener('loadedmetadata', handleLoaded, { once: true });
+        }
+      });
+      console.log(`✅ INFO: Video metadata loaded (${this.videoElement.videoWidth}x${this.videoElement.videoHeight})`);
+
+      console.log('▶️ INFO: Starting video playback...');
+      await this.videoElement.play();
+
+      console.log('⏳ INFO: Waiting for video frame data...');
+      let attempts = 0;
+      const maxAttempts = 50;
+      while (this.videoElement.readyState < 2 && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+
+      if (this.videoElement.readyState < 2) {
+        throw new Error(`Video readyState timeout (readyState: ${this.videoElement.readyState})`);
+      }
+
+      console.log(`✅ SUCCESS: Face Detection initialized (readyState: ${this.videoElement.readyState})`);
+
+      this.mediaStream.getVideoTracks().forEach(track => {
+        track.addEventListener('ended', () => {
+          console.error('❌ ERROR: Camera track ended unexpectedly');
+          if (this.isRunning) {
+            console.warn('⚠️ WARNING: Stopping detection due to stream loss');
+            this.stopDetection();
+          }
+        });
+      });
+    } catch (error) {
+      console.error('❌ ERROR: Face Detection initialization failed:', error);
+      this.cleanup();
+      throw error instanceof Error ? error : new Error('Failed to initialize face detection');
+    }
+  }
+    const isSmallScreen = window.innerWidth < 768;
+    return mobileRegex.test(userAgent) || (hasTouch && isSmallScreen);
+  }
+
+  async initialize(): Promise<void> {
+    try {
+      const deviceType = this.isMobile() ? 'Mobile' : 'Desktop';
+      console.log(`🎥 INFO: Initializing Face Detection Service (${deviceType})...`);
+      
+      // Step 1: Initialize the AI model FIRST
+      console.log('🧠 INFO: Loading AI stress analysis model...');
+      await stressAnalysisModel.initialize();
+      stressAnalysisModel.updateConfig({
+        minDetectionConfidence: this.settings.minDetectionConfidence,
+        minTrackingConfidence: this.settings.minTrackingConfidence,
+        blinkCloseThreshold: this.settings.blinkCloseThreshold,
+        blinkOpenThreshold: this.settings.blinkOpenThreshold,
+      });
+      console.log('✅ INFO: AI model loaded successfully');
+      
+      // Step 2: Set up video element
+      console.log('📹 INFO: Creating video element...');
+      this.videoElement = document.createElement('video');
+      this.videoElement.autoplay = true;
+      this.videoElement.playsInline = true;
+      this.videoElement.muted = true;
+      this.videoElement.width = this.settings.targetWidth;
+      this.videoElement.height = this.settings.targetHeight;
+      
+      // Step 3: Request camera access with robust fallback
+      console.log('🎬 INFO: Requesting camera access...');
+      this.mediaStream = await this.getCameraStream();
+      console.log(`✅ INFO: Camera stream acquired (${this.mediaStream.getVideoTracks()[0]?.label || 'unknown'})`);
+      
+      this.videoElement.srcObject = this.mediaStream;
+      
+      // Step 4: Wait for video metadata
+      console.log('⏳ INFO: Waiting for video metadata...');
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Video metadata load timeout'));
+        }, 5000);
+        
+        if (this.videoElement!.readyState >= 1) {
+          clearTimeout(timeout);
+          resolve();
+        } else {
+          this.videoElement!.addEventListener('loadedmetadata', () => {
+          const isMobileDevice = this.isMobile();
+          const adjustedWidth = isMobileDevice ? Math.min(640, this.settings.targetWidth) : this.settings.targetWidth;
+          const adjustedHeight = isMobileDevice ? Math.min(720, Math.max(480, this.settings.targetHeight)) : this.settings.targetHeight;
+          const adjustedFps = isMobileDevice ? 24 : this.settings.targetFps;
+          const minDetectionConfidence = isMobileDevice ? Math.max(0.35, this.settings.minDetectionConfidence - 0.1) : this.settings.minDetectionConfidence;
+          const minTrackingConfidence = isMobileDevice ? Math.max(0.35, this.settings.minTrackingConfidence - 0.1) : this.settings.minTrackingConfidence;
+
+          this.settings = {
+            ...this.settings,
+            targetWidth: adjustedWidth,
+            targetHeight: adjustedHeight,
+            targetFps: adjustedFps,
+            minDetectionConfidence,
+            minTrackingConfidence,
+          };
+
+          stressAnalysisModel.updateConfig({
+            minDetectionConfidence,
+            minTrackingConfidence,
+            blinkCloseThreshold: this.settings.blinkCloseThreshold,
+            blinkOpenThreshold: this.settings.blinkOpenThreshold,
+          });
+      console.log(`✅ INFO: Video metadata loaded (${this.videoElement.videoWidth}x${this.videoElement.videoHeight})`);
+      
+      // Step 5: Play video
+      console.log('▶️ INFO: Starting video playback...');
+      await this.videoElement.play();
+      
+      // Step 6: Wait for actual frame data
+      console.log('⏳ INFO: Waiting for video frame data...');
+      let attempts = 0;
+          this.videoElement.setAttribute('playsinline', 'true');
+          this.videoElement.setAttribute('muted', 'true');
+      const maxAttempts = 50; // 5 seconds max
+      while (this.videoElement.readyState < 2 && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      
+      if (this.videoElement.readyState < 2) {
+
+          const primaryTrack = this.mediaStream.getVideoTracks()[0];
+          if (primaryTrack) {
+            const appliedConstraints: MediaTrackConstraints = {
+              width: { ideal: this.settings.targetWidth, max: this.settings.targetWidth + 160 },
+              height: { ideal: this.settings.targetHeight, max: this.settings.targetHeight + 160 },
+              frameRate: { ideal: this.settings.targetFps, max: this.settings.targetFps + 6 },
+              facingMode: 'user',
+            };
+            try {
+              await primaryTrack.applyConstraints(appliedConstraints);
+            } catch (constraintErr) {
+              console.warn('⚠️ WARNING: Unable to apply preferred camera constraints:', constraintErr);
+            }
+          }
+        throw new Error(`Video readyState timeout (readyState: ${this.videoElement.readyState})`);
+      }
+      
+      console.log(`✅ SUCCESS: Face Detection initialized (readyState: ${this.videoElement.readyState})`);
+      
+      // Monitor for stream issues
+      this.mediaStream.getVideoTracks().forEach(track => {
+        track.addEventListener('ended', () => {
+          console.error('❌ ERROR: Camera track ended unexpectedly');
+          if (this.isRunning) {
+            console.warn('⚠️ WARNING: Stopping detection due to stream loss');
+            this.stopDetection();
+          }
+        });
+      });
+      
+    } catch (error) {
+      console.error('❌ ERROR: Face Detection initialization failed:', error);
+      this.cleanup();
+      throw error instanceof Error ? error : new Error('Failed to initialize face detection');
+    }
+  }
+
+  private async getCameraStream(): Promise<MediaStream> {
+    const isMobileDevice = this.isMobile();
+    const maxRetries = 3;
+    
+    console.log(`📱 INFO: Device type: ${isMobileDevice ? 'Mobile' : 'Desktop'}`);
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`📹 INFO: Camera access attempt ${attempt}/${maxRetries}...`);
+        
+        // Try with facingMode first (works on most devices)
+        if (attempt === 1) {
+          console.log('🎯 INFO: Trying facingMode: user (front camera)');
+          const constraints: MediaStreamConstraints = {
+            video: {
+              width: { ideal: this.settings.targetWidth },
+              height: { ideal: this.settings.targetHeight },
+              facingMode: 'user', // Front camera
+            },
+            audio: false,
+          };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          console.log(`✅ SUCCESS: Camera acquired via facingMode`);
+          return stream;
+        }
+        
+        // Try with specific device ID (mobile fallback)
+        if (attempt === 2 && isMobileDevice) {
+          console.log('🔍 INFO: Enumerating camera devices...');
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoInputs = devices.filter(d => d.kind === 'videoinput');
+          console.log(`📹 INFO: Found ${videoInputs.length} video input(s):`, videoInputs.map(d => d.label || 'unlabeled'));
+          
+          const frontCamera = videoInputs.find(d => /front|face|user/i.test(d.label)) || videoInputs[0];
+          
+          if (frontCamera) {
+            console.log(`🎯 INFO: Selecting camera: ${frontCamera.label || frontCamera.deviceId}`);
+            const constraints: MediaStreamConstraints = {
+              video: {
+                deviceId: { exact: frontCamera.deviceId },
+                width: { ideal: this.settings.targetWidth },
+                height: { ideal: this.settings.targetHeight },
+              },
+              audio: false,
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            console.log(`✅ SUCCESS: Camera acquired via deviceId`);
+            return stream;
+          }
+        }
+        
+        // Final fallback: simplest constraints
+        if (attempt === 3) {
+          console.log('🔄 INFO: Using minimal constraints (last attempt)');
+          const constraints: MediaStreamConstraints = {
+            video: true,
+            audio: false,
+          };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          console.log(`✅ SUCCESS: Camera acquired with minimal constraints`);
+          return stream;
+        }
+        
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.error(`❌ ERROR: Camera attempt ${attempt} failed:`, errorMsg);
+        
+        // Check for specific error types
+        if (errorMsg.includes('Permission denied') || errorMsg.includes('NotAllowedError')) {
+          throw new Error('Camera permission denied. Please allow camera access in your browser settings.');
+        }
+        if (errorMsg.includes('NotFoundError') || errorMsg.includes('not found')) {
+          throw new Error('No camera found. Please ensure a camera is connected.');
+        }
+        if (errorMsg.includes('NotReadableError')) {
+          throw new Error('Camera is in use by another application. Please close other apps using the camera.');
+        }
+        
+        if (attempt < maxRetries) {
+          console.log(`⏳ INFO: Retrying in ${300 * attempt}ms...`);
+          await new Promise(res => setTimeout(res, 300 * attempt));
+          continue;
+        }
+        throw new Error(`Unable to access camera after ${maxRetries} attempts: ${errorMsg}`);
+      }
+    }
+    
+    throw new Error('Camera access failed after all retries');
+  }
+
+  startDetection(callback: (metrics: FaceMetrics) => void): void {
+    if (this.isRunning) {
+      console.warn('⚠️ WARNING: Detection already running');
+      return;
+    }
+    
+    if (!this.videoElement || !this.mediaStream) {
+      console.error('❌ ERROR: Face detection not initialized');
+      throw new Error('Face detection not initialized. Call initialize() first.');
+    }
+    
+    console.log('▶️ INFO: Starting face detection loop...');
+    this.callback = callback;
+    this.isRunning = true;
+    stressAnalysisModel.reset();
+    
+    // Reset smoothing for new session
+    this.smoothedBlinkRate = 0;
+    this.smoothedBrowFurrow = 0;
+    this.smoothedGazeStability = 0;
+    
+    this.detectionLoop();
+  }
+
+  private async detectionLoop(): Promise<void> {
+    if (!this.isRunning || !this.videoElement || !this.callback) {
+      return;
+    }
+    
+    try {
+      // Analyze current video frame
+      const result: StressAnalysisResult = await stressAnalysisModel.analyzeFrame(this.videoElement);
+      
+      // Convert to FaceMetrics format with smoothing
+      const metrics = this.convertToFaceMetrics(result);
+      
+      // Send to callback (emit every frame, typically 100-200ms at 5-10 FPS)
+      this.callback(metrics);
+      
+    } catch (error) {
+      console.error('❌ ERROR: Detection loop failed:', error instanceof Error ? error.message : error);
+      // Continue loop despite error (resilient to frame processing issues)
+    }
+    
+    // Schedule next frame
+    if (this.isRunning) {
+      this.animationFrameId = requestAnimationFrame(() => this.detectionLoop());
+    }
+  }
+
+  private convertToFaceMetrics(result: StressAnalysisResult): FaceMetrics {
+    // Apply exponential smoothing to reduce jitter
+    const alpha = 0.3; // Smoothing factor
+    
+  this.smoothedBlinkRate = this.smoothedBlinkRate * (1 - alpha) + result.blinkRate * alpha;
+  this.smoothedBrowFurrow = this.smoothedBrowFurrow * (1 - alpha) + (result.metrics.browTension / 100) * alpha;
+  this.smoothedGazeStability = this.smoothedGazeStability * (1 - alpha) + (1 - result.metrics.gazeInstability / 100) * alpha;
+    
+    // Calculate derived metrics
+    const stress = result.stressScore / 100;
+    const concentration = result.faceDetected ? Math.max(0, 1 - result.metrics.gazeInstability / 100) : 0;
+    const fatigue = result.faceDetected ? Math.min(1, (result.blinkRate / 30) * 0.5 + result.metrics.browTension / 200) : 0;
+    
+    return {
+      isPresent: result.faceDetected,
+      blinkRate: Math.round(this.smoothedBlinkRate * 10) / 10, // One decimal
+  eyeAspectRatio: Math.round(result.eyeAspectRatio * 100) / 100,
+  jawOpenness: Math.max(0, Math.min(1, 1 - result.metrics.jawClench / 100)),
+      browFurrow: Math.round(this.smoothedBrowFurrow * 100) / 100,
+      gazeStability: Math.round(this.smoothedGazeStability * 100) / 100,
+      expressionCues: {
+        concentration: Math.round(concentration * 100) / 100,
+        stress: Math.round(stress * 100) / 100,
+        fatigue: Math.round(fatigue * 100) / 100,
+      },
+      fps: result.fps,
+      latencyMs: result.latencyMs,
+      confidence: result.confidence,
+      stressScore: result.stressScore,
+      isHighStress: result.isHighStress,
+      signals: {
+        browTension: result.metrics.browTension,
+        jawClench: result.metrics.jawClench,
+        blinkRateAbnormal: result.metrics.blinkRateAbnormal,
+        lipCompression: result.metrics.lipPress,
+        microExpressionTension: result.metrics.microExpressionTension,
+        headMovement: result.metrics.headMovement,
+        gazeInstability: result.metrics.gazeInstability,
+      },
+      blinkData: {
+        totalBlinksInWindow: result.blinkMetrics.totalBlinksInWindow,
+        blinkRatePerSecond: result.blinkRate / 60,
+        lastBlinkTimestamp: result.blinkMetrics.lastBlinkTimestamp ?? Date.now(),
+        avgBlinkDuration: result.blinkMetrics.avgBlinkDuration || 0,
+      },
+    };
+  }
+
+  stopDetection(): void {
+    if (!this.isRunning) {
+      return;
+    }
+    
+    console.log('⏸️ Stopping face detection...');
+    this.isRunning = false;
+    
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    
+    this.callback = null;
+    this.cleanup();
+  }
+
+  private cleanup(): void {
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream = null;
+    }
+    
+    if (this.videoElement) {
+      this.videoElement.srcObject = null;
+      this.videoElement = null;
+    }
+    
+    stressAnalysisModel.reset();
+    
+    // Reset smoothing
+    this.smoothedBlinkRate = 0;
+    this.smoothedBrowFurrow = 0;
+    this.smoothedGazeStability = 0;
+  }
+
+  getBlinkHistory(): BlinkEvent[] {
+    return stressAnalysisModel.getBlinkHistory().map(event => ({ ...event }));
+  }
+
+  clearBlinkHistory(): void {
+    stressAnalysisModel.clearBlinkHistory();
+  }
+
+  setSettings(partial: Partial<FaceDetectionSettings>): void {
+    this.settings = { ...this.settings, ...partial };
+    stressAnalysisModel.updateConfig({
+      minDetectionConfidence: this.settings.minDetectionConfidence,
+      minTrackingConfidence: this.settings.minTrackingConfidence,
+      blinkCloseThreshold: this.settings.blinkCloseThreshold,
+      blinkOpenThreshold: this.settings.blinkOpenThreshold,
+    });
+  }
+
+  getSettings(): FaceDetectionSettings {
+    return { ...this.settings };
+  }
+}
+
+export const faceDetectionService = new FaceDetectionService();

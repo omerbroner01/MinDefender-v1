@@ -1,0 +1,209 @@
+import type {
+  OrderContext as SharedOrderContext,
+  CameraSignals,
+  ImpulseControlMetrics,
+  FocusStabilityMetrics,
+  ReactionConsistencyMetrics,
+  FullAssessmentRequest,
+  FullAssessmentResponse,
+} from '@shared/tradePauseAI';
+
+export type OrderContext = SharedOrderContext;
+
+export interface StroopTrial {
+  word: string;
+  color: string;
+  response: string;
+  reactionTimeMs: number;
+  correct: boolean;
+}
+
+export interface CognitiveTestResult {
+  testType: string;
+  trials: TestTrial[];
+  overallScore: number;
+  reactionTimeStats: {
+    mean: number;
+    median: number;
+    standardDeviation: number;
+    consistency: number;
+  };
+  accuracyStats: {
+    overall: number;
+    byDifficulty: Record<string, number>;
+  };
+  attentionMetrics: {
+    focusLapses: number;
+    vigilanceDecline: number;
+    taskSwitchingCost: number;
+  };
+  stressIndicators: {
+    performanceDecline: number;
+    errorRate: number;
+    responseVariability: number;
+  };
+}
+
+export interface TestTrial {
+  testType: string;
+  trialNumber: number;
+  stimulus: string;
+  correctResponse: string;
+  userResponse: string;
+  reactionTimeMs: number;
+  correct: boolean;
+  difficulty: 'easy' | 'medium' | 'hard';
+  timestamp: number;
+  hesitationCount: number;
+  responsePattern: string;
+  displayColor?: string;
+  stimulusType?: string;
+  memoryType?: string;
+}
+
+export interface AssessmentSignals {
+  mouseMovements?: number[];
+  keystrokeTimings?: number[];
+  clickLatency?: number;
+  stroopTrials?: StroopTrial[];
+  cognitiveResults?: CognitiveTestResult[];
+  stressLevel?: number;
+  voiceProsodyFeatures?: {
+    pitch: number;
+    jitter: number;
+    shimmer: number;
+    energy: number;
+  };
+  facialExpressionFeatures?: {
+    browFurrow: number;
+    blinkRate: number;
+    gazeFixation: number;
+  };
+  facialMetrics?: {
+    isPresent: boolean;
+    blinkRate: number;
+    eyeAspectRatio: number;
+    jawOpenness: number;
+    browFurrow: number;
+    gazeStability: number;
+    // STRESS DETECTION: New comprehensive stress fields
+    stressScore?: number; // 0-100
+    isHighStress?: boolean;
+    signals?: {
+      browTension: number;
+      jawClench: number;
+      blinkRateAbnormal: number;
+      lipCompression: number;
+      microExpressionTension: number;
+      headMovement: number;
+      gazeInstability: number;
+    };
+  };
+}
+
+export interface AssessmentResult {
+  assessmentId: string;
+  // New API structure
+  shouldAllowTrade?: boolean;
+  cooldownMs?: number;
+  emotionalRiskScore?: number;
+  reason?: string;
+  // Legacy fields
+  riskScore?: number;
+  verdict?: 'go' | 'hold' | 'block';
+  reasonTags?: string[];
+  confidence?: number;
+  recommendedAction?: string;
+  cooldownDuration?: number;
+}
+
+export interface Policy {
+  id: string;
+  name: string;
+  strictnessLevel: 'lenient' | 'standard' | 'strict' | 'custom';
+  riskThreshold: number;
+  cooldownDuration: number;
+  enabledModes: {
+    cognitiveTest: boolean;
+    behavioralBiometrics: boolean;
+    selfReport: boolean;
+    voiceProsody: boolean;
+    facialExpression: boolean;
+  };
+  overrideAllowed: boolean;
+  supervisorNotification: boolean;
+  dataRetentionDays: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserBaseline {
+  id: string;
+  userId: string;
+  reactionTimeMs?: number;
+  reactionTimeStdDev?: number;
+  accuracy?: number;
+  accuracyStdDev?: number;
+  mouseStability?: number;
+  keystrokeRhythm?: number;
+  calibrationCount: number;
+  lastCalibrated: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Assessment {
+  id: string;
+  userId: string;
+  policyId: string;
+  orderContext: OrderContext;
+  quickCheckDurationMs?: number;
+  stroopTestResults?: StroopTrial[];
+  selfReportStress?: number;
+  behavioralMetrics?: any;
+  voiceProsodyScore?: number;
+  facialExpressionScore?: number;
+  riskScore: number;
+  verdict: 'go' | 'hold' | 'block';
+  reasonTags: string[];
+  confidence?: number;
+  cooldownCompleted?: boolean;
+  cooldownDurationMs?: number;
+  journalEntry?: string;
+  journalTrigger?: string;
+  journalPlan?: string;
+  overrideUsed?: boolean;
+  overrideReason?: string;
+  supervisorNotified?: boolean;
+  tradeExecuted?: boolean;
+  tradeOutcome?: any;
+  createdAt: string;
+}
+
+export interface AnalyticsStats {
+  totalAssessments: number;
+  triggerRate: number;
+  blockRate: number;
+  overrideRate: number;
+  averageRiskScore: number;
+}
+
+export interface RealTimeEvent {
+  id: string;
+  eventType: string;
+  userId?: string;
+  assessmentId?: string;
+  data: any;
+  processed: boolean;
+  createdAt: string;
+}
+
+export type {
+  CameraSignals,
+  ImpulseControlMetrics,
+  FocusStabilityMetrics,
+  ReactionConsistencyMetrics,
+  FullAssessmentRequest,
+  FullAssessmentResponse,
+} from '@shared/tradePauseAI';
